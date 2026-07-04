@@ -1,0 +1,273 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/ebmobodo/sentiment-analysis-distilbert/blob/main/Sentiment-analysis-%20distibert\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# Fine-Tuning DistilBERT for Sentiment Analysis\n",
+        "Author:  Mobodo Ebubechukwu\n",
+        "\n",
+        "Goal: In this project, I am going to fine-tune a pre-trained machine learning model called DistilBERT to classify movie reviews as either Positive or Negative."
+      ],
+      "metadata": {
+        "id": "I26008SntWPT"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### 1. Installing Required Libraries\n",
+        "First, I need to install the Hugging Face `transformers` and `datasets` libraries to get my model and data."
+      ],
+      "metadata": {
+        "id": "VmRZhxf7t71G"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "!pip install transformers datasets evaluate accelerate -q"
+      ],
+      "metadata": {
+        "id": "YhAyWQnMt-in"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " 2. Loading the IMDB Dataset\n",
+        "I am using the IMDB movie review dataset. To save time and compute power, I am shrinking the dataset to 1,000 training examples and 500 testing examples."
+      ],
+      "metadata": {
+        "id": "HsiS2d-Ov7Xp"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from datasets import load_dataset\n",
+        "\n",
+        "# Added the 'stanfordnlp/' namespace to fix the HfUriError\n",
+        "dataset = load_dataset(\"stanfordnlp/imdb\")\n",
+        "\n",
+        "# Shrink the dataset for faster training\n",
+        "small_train = dataset[\"train\"].shuffle(seed=42).select(range(1000))\n",
+        "small_test = dataset[\"test\"].shuffle(seed=42).select(range(500))\n",
+        "\n",
+        "print(\"Data loaded! Here is a sample review:\")\n",
+        "print(small_train[0]['text'])"
+      ],
+      "metadata": {
+        "id": "2a_U3B9btyqL"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " 3. Tokenizing the Data\n",
+        "AI models can't read English; they only understand numbers. I am using a Tokenizer to convert the movie reviews into a format the DistilBERT model can understand."
+      ],
+      "metadata": {
+        "id": "MHVPDkYG0yUY"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import AutoTokenizer\n",
+        "\n",
+        "tokenizer = AutoTokenizer.from_pretrained(\"distilbert-base-uncased\")\n",
+        "\n",
+        "def tokenize_function(examples):\n",
+        "    return tokenizer(examples[\"text\"], padding=\"max_length\", truncation=True)\n",
+        "\n",
+        "tokenized_train = small_train.map(tokenize_function, batched=True)\n",
+        "tokenized_test = small_test.map(tokenize_function, batched=True)\n",
+        "print(\"Tokenization complete!\")"
+      ],
+      "metadata": {
+        "collapsed": true,
+        "id": "0DhWX-xc1HvT"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "4. Loading the Pre-Trained Model\n",
+        "I am loading `distilbert-base-uncased`. I am telling it to expect 2 labels: 0 for Negative, and 1 for Positive."
+      ],
+      "metadata": {
+        "id": "sEBnC42N15Sf"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import AutoModelForSequenceClassification\n",
+        "\n",
+        "model = AutoModelForSequenceClassification.from_pretrained(\"distilbert-base-uncased\", num_labels=2)"
+      ],
+      "metadata": {
+        "collapsed": true,
+        "id": "4yhyOEzx184W"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " 5. Setting up Metrics\n",
+        "To know if my model is learning, I need to track its accuracy during training."
+      ],
+      "metadata": {
+        "id": "bzkHD20N3N0_"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "!pip install evaluate -q\n",
+        "import evaluate\n",
+        "import numpy as np\n",
+        "\n",
+        "metric = evaluate.load(\"accuracy\")\n",
+        "\n",
+        "def compute_metrics(eval_pred):\n",
+        "    logits, labels = eval_pred\n",
+        "    predictions = np.argmax(logits, axis=-1)\n",
+        "    return metric.compute(predictions=predictions, references=labels)"
+      ],
+      "metadata": {
+        "id": "xR1vx3QV3PiC"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ],
+      "metadata": {
+        "id": "uCrKwk6VxSE4"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " 6. Fine-Tuning the Model\n",
+        "Now, I will set up the Training Arguments and start the training process. The model will look at the data 3 times (3 epochs)."
+      ],
+      "metadata": {
+        "id": "fV8m1UOL3rp9"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import TrainingArguments, Trainer\n",
+        "from transformers import AutoModelForSequenceClassification\n",
+        "\n",
+        "# Re-defining model to ensure it's available in this cell's scope\n",
+        "model = AutoModelForSequenceClassification.from_pretrained(\"distilbert-base-uncased\", num_labels=2)\n",
+        "\n",
+        "training_args = TrainingArguments(\n",
+        "    # THIS IS THE CHANGED LINE:\n",
+        "    output_dir=\"/content/drive/MyDrive/my_movie_model\",\n",
+        "    eval_strategy=\"epoch\",\n",
+        "    learning_rate=2e-5,\n",
+        "    per_device_train_batch_size=8,\n",
+        "    per_device_eval_batch_size=8,\n",
+        "    num_train_epochs=3,\n",
+        ")\n",
+        "\n",
+        "trainer = Trainer(\n",
+        "    model=model,\n",
+        "    args=training_args,\n",
+        "    train_dataset=tokenized_train,\n",
+        "    eval_dataset=tokenized_test,\n",
+        "    compute_metrics=compute_metrics,\n",
+        ")\n",
+        "\n",
+        "trainer.train()"
+      ],
+      "metadata": {
+        "id": "OztB87C-30f2"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " 7. Testing the Fine-Tuned Model\n",
+        "Training is done! Now I will write my own custom movie reviews and see if the AI can correctly guess if they are positive or negative.\n",
+        "*(Label 1 = Positive, Label 0 = Negative)*"
+      ],
+      "metadata": {
+        "id": "tRmwS8Df9iZV"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import pipeline\n",
+        "\n",
+        "# Set up a pipeline to use our newly trained model\n",
+        "classifier = pipeline(\"sentiment-analysis\", model=model, tokenizer=tokenizer, device=0)\n",
+        "\n",
+        "# Write your own reviews here!\n",
+        "my_reviews = [\n",
+        "    \"This was the most amazing and breathtaking movie I have ever seen!\",\n",
+        "    \"I hated this movie. The acting was terrible and the plot made no sense.\",\n",
+        "    \"The trailer looked amazing and the actors are incredibly talented, but the actual movie was a complete disaster.\",\n",
+        "    \"The first half was incredibly boring and I almost walked out. But the twist at the end made it the best movie I've seen all year!\"\n",
+        "]\n",
+        "\n",
+        "results = classifier(my_reviews)\n",
+        "\n",
+        "for review, result in zip(my_reviews, results):\n",
+        "    print(f\"Review: {review}\")\n",
+        "    print(f\"Prediction: {result['label']} (Confidence: {result['score']:.2f})\\n\")"
+      ],
+      "metadata": {
+        "id": "U8ix-slj9kmW"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "display_name": "Python 3",
+      "name": "python3"
+    },
+    "accelerator": "GPU"
+  },
+  "nbformat": 4,
+  "nbformat_minor": 0
+}
